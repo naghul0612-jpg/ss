@@ -26,6 +26,16 @@ const DEBUG_ERRORS = NODE_ENV !== "production";
 const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 
+function clientErrorStatus(err) {
+  if (!err) return 500;
+  if (err.name === "CastError") return 400;
+  if (err.name === "ValidationError") return 400;
+  // Some Mongoose cast failures come with these shapes too.
+  if (typeof err.message === "string" && err.message.toLowerCase().includes("cast to")) return 400;
+  if (typeof err.message === "string" && err.message.toLowerCase().includes("objectid")) return 400;
+  return 500;
+}
+
 if (!MONGODB_URI) {
   console.error("Missing MONGODB_URI in environment.");
   process.exit(1);
@@ -171,6 +181,10 @@ function authMiddleware(req, res, next) {
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
+    // Validate ObjectId early to avoid Mongoose CastError -> 500
+    if (!mongoose.Types.ObjectId.isValid(payload.sub)) {
+      return res.status(401).json({ message: "Invalid token subject." });
+    }
     req.userId = payload.sub;
     return next();
   } catch {
@@ -316,6 +330,7 @@ api.post("/cart/add", authMiddleware, async (req, res) => {
   try {
     const { productId, quantity } = req.body || {};
     if (!productId) return res.status(400).json({ message: "productId required." });
+    if (!mongoose.Types.ObjectId.isValid(productId)) return res.status(400).json({ message: "Invalid productId." });
     const qty = quantity ? Number(quantity) : 1;
     if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ message: "quantity must be >= 1." });
 
@@ -336,7 +351,7 @@ api.post("/cart/add", authMiddleware, async (req, res) => {
     return res.status(201).json({ message: "Added to cart." });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({
+    return res.status(clientErrorStatus(err)).json({
       message: "Failed to add to cart.",
       ...(DEBUG_ERRORS ? { error: err.message, stack: err.stack } : {})
     });
@@ -347,6 +362,7 @@ api.patch("/cart/update", authMiddleware, async (req, res) => {
   try {
     const { productId, quantity } = req.body || {};
     if (!productId) return res.status(400).json({ message: "productId required." });
+    if (!mongoose.Types.ObjectId.isValid(productId)) return res.status(400).json({ message: "Invalid productId." });
     const qty = Number(quantity);
     if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ message: "quantity must be >= 1." });
 
@@ -361,7 +377,7 @@ api.patch("/cart/update", authMiddleware, async (req, res) => {
     return res.json({ message: "Cart updated." });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({
+    return res.status(clientErrorStatus(err)).json({
       message: "Failed to update cart.",
       ...(DEBUG_ERRORS ? { error: err.message, stack: err.stack } : {})
     });
@@ -372,6 +388,7 @@ api.delete("/cart/remove", authMiddleware, async (req, res) => {
   try {
     const { productId } = req.body || {};
     if (!productId) return res.status(400).json({ message: "productId required." });
+    if (!mongoose.Types.ObjectId.isValid(productId)) return res.status(400).json({ message: "Invalid productId." });
 
     const cart = await Cart.findOne({ userId: req.userId });
     if (!cart) return res.status(404).json({ message: "Cart not found." });
@@ -381,7 +398,7 @@ api.delete("/cart/remove", authMiddleware, async (req, res) => {
     return res.json({ message: "Removed from cart." });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({
+    return res.status(clientErrorStatus(err)).json({
       message: "Failed to remove item.",
       ...(DEBUG_ERRORS ? { error: err.message, stack: err.stack } : {})
     });
@@ -437,7 +454,7 @@ api.post("/checkout", authMiddleware, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({
+    return res.status(clientErrorStatus(err)).json({
       message: "Checkout failed.",
       ...(DEBUG_ERRORS ? { error: err.message, stack: err.stack } : {})
     });
