@@ -20,6 +20,14 @@ app.use(express.json());
 app.use(cors());
 app.use(morgan("dev"));
 
+// Log unhandled issues so we can diagnose 500s quickly.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
+
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const DEBUG_ERRORS = NODE_ENV !== "production";
@@ -494,6 +502,18 @@ api.post("/checkout", authMiddleware, async (req, res) => {
       ...(DEBUG_ERRORS ? { error: err.message, stack: err.stack } : {})
     });
   }
+});
+
+// Request logger (helps identify which API endpoint triggers 500)
+app.use("/api", (req, _res, next) => {
+  console.log(`[API] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// Request logger (helps identify which API endpoint triggers 500)
+app.use("/api", (req, _res, next) => {
+  console.log(`[API] ${req.method} ${req.originalUrl}`);
+  next();
 });
 
 app.use("/api", api);
