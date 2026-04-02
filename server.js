@@ -31,6 +31,16 @@ function clientErrorStatus(err) {
   if (err.name === "CastError") return 400;
   if (err.name === "ValidationError") return 400;
   if (err.code === 11000) return 409; // Mongo duplicate key
+  // Common Mongo connection failures should not look like "Internal server error"
+  const msg = typeof err.message === "string" ? err.message.toLowerCase() : "";
+  if (
+    err.name === "MongooseServerSelectionError" ||
+    err.name === "MongoNetworkError" ||
+    err.name === "MongoServerError" && msg.includes("failed to connect")
+  ) {
+    return 503;
+  }
+  if (msg.includes("econnrefused") || msg.includes("connection refused") || msg.includes("failed to connect")) return 503;
   // Some Mongoose cast failures come with these shapes too.
   if (typeof err.message === "string" && err.message.toLowerCase().includes("cast to")) return 400;
   if (typeof err.message === "string" && err.message.toLowerCase().includes("objectid")) return 400;
@@ -493,8 +503,14 @@ app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   const status = clientErrorStatus(err);
   res.status(status).json({
-    message: status === 400 ? "Invalid request." : "Internal server error",
-    ...(DEBUG_ERRORS ? { error: err.message, stack: err.stack } : {})
+    message:
+      status === 503
+        ? "MongoDB not reachable. Start MongoDB or set a correct MONGODB_URI in .env."
+        : status === 400
+          ? "Invalid request."
+          : "Internal server error",
+    error: err?.message || "Unknown error",
+    ...(DEBUG_ERRORS ? { stack: err?.stack } : {})
   });
 });
 
